@@ -19,6 +19,7 @@ package catalyst
 import (
 	"fmt"
 	"math/big"
+	"os"
 	"testing"
 	"time"
 
@@ -32,6 +33,7 @@ import (
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/eth"
 	"github.com/ethereum/go-ethereum/eth/ethconfig"
+	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/node"
 	"github.com/ethereum/go-ethereum/params"
 )
@@ -134,7 +136,7 @@ func TestSetHeadBeforeTotalDifficulty(t *testing.T) {
 	}
 	if resp, err := api.ForkchoiceUpdatedV1(fcState, nil); err != nil {
 		t.Errorf("fork choice updated should not error: %v", err)
-	} else if resp.PayloadStatus.Status != beacon.INVALIDTERMINALBLOCK {
+	} else if resp.PayloadStatus.Status != beacon.INVALID_TERMINAL_BLOCK.Status {
 		t.Errorf("fork choice updated before total terminal difficulty should be INVALID")
 	}
 }
@@ -394,11 +396,12 @@ func TestEth2DeepReorg(t *testing.T) {
 func startEthService(t *testing.T, genesis *core.Genesis, blocks []*types.Block) (*node.Node, *eth.Ethereum) {
 	t.Helper()
 
+	// Disable verbose log output which is noise to some extent.
+	log.Root().SetHandler(log.LvlFilterHandler(log.LvlCrit, log.StreamHandler(os.Stderr, log.TerminalFormat(true))))
 	n, err := node.New(&node.Config{})
 	if err != nil {
 		t.Fatal("can't create node:", err)
 	}
-
 	ethcfg := &ethconfig.Config{Genesis: genesis, Ethash: ethash.Config{PowMode: ethash.ModeFake}, TrieTimeout: time.Minute, TrieDirtyCache: 256, TrieCleanCache: 256}
 	ethservice, err := eth.New(n, ethcfg)
 	if err != nil {
@@ -411,9 +414,10 @@ func startEthService(t *testing.T, genesis *core.Genesis, blocks []*types.Block)
 		n.Close()
 		t.Fatal("can't import test blocks:", err)
 	}
+	time.Sleep(500 * time.Millisecond) // give txpool enough time to consume head event
+
 	ethservice.SetEtherbase(testAddr)
 	ethservice.SetSynced()
-
 	return n, ethservice
 }
 

@@ -417,8 +417,18 @@ func (api *ConsensusAPI) delayPayloadImport(block *types.Block) (beacon.PayloadS
 	// payload as non-integratable on top of the existing sync. We'll just
 	// have to rely on the beacon client to forcefully update the head with
 	// a forkchoice update request.
-	log.Warn("Ignoring payload with missing parent", "number", block.NumberU64(), "hash", block.Hash(), "parent", block.ParentHash())
-	return beacon.PayloadStatusV1{Status: beacon.ACCEPTED}, nil
+	if api.eth.SyncMode() == downloader.FullSync {
+		// In full sync mode, failure to import a well-formed block can only mean
+		// that the parent state is missing and the syncer rejected extending the
+		// current cycle with the new payload.
+		log.Warn("Ignoring payload with missing parent", "number", block.NumberU64(), "hash", block.Hash(), "parent", block.ParentHash())
+	} else {
+		// In non-full sync mode (i.e. snap sync) all payloads are rejected until
+		// snap sync terminates as snap sync relies on direct database injections
+		// and cannot afford concurrent out-if-band modifications via imports.
+		log.Warn("Ignoring payload while snap syncing", "number", block.NumberU64(), "hash", block.Hash())
+	}
+	return beacon.PayloadStatusV1{Status: beacon.SYNCING}, nil
 }
 
 // setInvalidAncestor is a callback for the downloader to notify us if a bad block
@@ -469,10 +479,15 @@ func (api *ConsensusAPI) checkInvalidAncestor(check common.Hash, head common.Has
 		}
 		api.invalidTipsets[head] = invalid
 	}
+	// If the last valid hash is the terminal pow block, return 0x0 for latest valid hash
+	lastValid := &invalid.ParentHash
+	if header := api.eth.BlockChain().GetHeader(invalid.ParentHash, invalid.Number.Uint64()-1); header != nil && header.Difficulty.Sign() != 0 {
+		lastValid = &common.Hash{}
+	}
 	failure := "links to previously rejected block"
 	return &beacon.PayloadStatusV1{
 		Status:          beacon.INVALID,
-		LatestValidHash: &invalid.ParentHash,
+		LatestValidHash: lastValid,
 		ValidationError: &failure,
 	}
 }
